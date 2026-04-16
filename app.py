@@ -227,52 +227,48 @@ def build_tree_graph(tree):
 
 
 # -----------------------
-# openai
+# OPENAI
 # -----------------------
 
 def call_llm_json(client, prompt):
 
-    response = client.chat.completions.create(
-
-        model="gpt-5",
-
-        temperature=0.2,
-
-        response_format={"type": "json_object"},
-
-        messages=[
-            {"role": "system", "content": "Rispondi solo con JSON valido"},
-            {"role": "user", "content": prompt}
-        ]
-    )
-
-    content = response.choices[0].message.content
-
     try:
-        return json.loads(content)
 
-    except:
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=prompt,
+            temperature=0.2,
+            response_format={"type": "json_object"}
+        )
 
-        return {
-            "tree": []
-        }
+        text = response.output_text
+
+        return json.loads(text)
+
+    except Exception as e:
+
+        st.error(f"OpenAI error: {e}")
+
+        return {"tree": []}
 
 
 def call_llm_text(client, prompt):
 
-    response = client.chat.completions.create(
+    try:
 
-        model="gpt-5",
+        response = client.responses.create(
+            model="gpt-4.1-mini",
+            input=prompt,
+            temperature=0.6
+        )
 
-        temperature=0.6,
+        return response.output_text
 
-        messages=[
-            {"role": "system", "content": "Sei un SEO copywriter"},
-            {"role": "user", "content": prompt}
-        ]
-    )
+    except Exception as e:
 
-    return response.choices[0].message.content
+        st.error(f"OpenAI error: {e}")
+
+        return ""
 
 
 # -----------------------
@@ -325,8 +321,7 @@ if st.button("Analyze"):
 
 
     prompt = f"""
-
-Analizza il contenuto e fai gap analysis.
+Analizza il contenuto e fai gap analysis SEO.
 
 KEYWORD:
 {keyword}
@@ -340,13 +335,14 @@ CONTENT:
 COMPETITOR:
 {competitors_text[:12000]}
 
-Rispondi JSON con:
+Restituisci JSON con struttura:
 
 tree:
-topic
-status
-children
+ topic
+ status
+ children
 """
+
 
     gap = call_llm_json(client, prompt)
 
@@ -375,17 +371,15 @@ if "gap" in st.session_state:
     if st.button("Generate optimized content"):
 
         prompt = f"""
+Scrivi contenuto SEO ottimizzato.
 
-Scrivi contenuto SEO per keyword:
-
+KEYWORD:
 {keyword}
 
 Mantieni H1:
-
 {h1}
 
-Content:
-
+CONTENT:
 {text[:10000]}
 """
 
