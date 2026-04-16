@@ -29,37 +29,33 @@ BLOCKED_DOMAINS = {
 # helper
 # -----------------------
 
-def clean_text(text):
+def clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
 
-def fetch_page(url):
-
+def fetch_page(url: str):
     try:
-
         r = requests.get(
             url,
             timeout=20,
-            headers={"User-Agent": USER_AGENT}
+            headers={"User-Agent": USER_AGENT},
         )
+        r.raise_for_status()
 
         html = r.text
-
         soup = BeautifulSoup(html, "html.parser")
 
         for tag in soup(["script", "style", "noscript"]):
             tag.decompose()
 
         text = clean_text(soup.get_text(" "))
-
         return html, text[:20000]
 
-    except:
+    except Exception:
         return "", ""
 
 
-def extract_metadata(html):
-
+def extract_metadata(html: str):
     soup = BeautifulSoup(html, "html.parser")
 
     title = ""
@@ -80,7 +76,7 @@ def extract_metadata(html):
     return {
         "title": title,
         "h1": h1,
-        "meta": meta
+        "meta": meta,
     }
 
 
@@ -88,67 +84,62 @@ def extract_metadata(html):
 # SERP
 # -----------------------
 
-def get_serp(keyword, api_key):
-
+def get_serp(keyword: str, api_key: str):
     url = "https://google.serper.dev/search"
 
     headers = {
         "X-API-KEY": api_key,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
     payload = {
         "q": keyword,
-        "num": 10
+        "num": 10,
     }
 
-    r = requests.post(url, json=payload, headers=headers)
+    r = requests.post(url, json=payload, headers=headers, timeout=30)
+    r.raise_for_status()
 
     data = r.json()
-
     results = []
 
     for item in data.get("organic", []):
-
         link = item.get("link")
-
         if not link:
             continue
 
-        domain = urlparse(link).netloc
-
+        domain = urlparse(link).netloc.lower()
         if any(d in domain for d in BLOCKED_DOMAINS):
             continue
 
-        results.append({
-            "title": item.get("title"),
-            "link": link,
-            "snippet": item.get("snippet")
-        })
+        results.append(
+            {
+                "title": item.get("title", ""),
+                "link": link,
+                "snippet": item.get("snippet", ""),
+            }
+        )
 
     return results[:5]
 
 
-def get_paa(keyword, api_key):
-
+def get_paa(keyword: str, api_key: str):
     url = "https://serpapi.com/search.json"
 
     params = {
         "engine": "google",
         "q": keyword,
-        "api_key": api_key
+        "api_key": api_key,
     }
 
-    r = requests.get(url, params=params)
+    r = requests.get(url, params=params, timeout=30)
+    r.raise_for_status()
 
     data = r.json()
-
     questions = []
 
     for q in data.get("related_questions", []):
-
         question = q.get("question")
-
         if question:
             questions.append(question)
 
@@ -160,30 +151,27 @@ def get_paa(keyword, api_key):
 # -----------------------
 
 def build_tree_graph(tree):
-
     G = nx.DiGraph()
-
     G.add_node("Gap Analysis")
 
     for macro in tree:
-
-        macro_node = f"{macro.get('topic')} ({macro.get('status')})"
-
+        macro_topic = macro.get("topic", "Topic")
+        macro_status = macro.get("status", "unknown")
+        macro_node = f"{macro_topic} ({macro_status})"
         G.add_edge("Gap Analysis", macro_node)
 
         for child in macro.get("children", []):
-
-            child_node = f"{child.get('topic')} ({child.get('status')})"
-
+            child_topic = child.get("topic", "Subtopic")
+            child_status = child.get("status", "unknown")
+            child_node = f"{child_topic} ({child_status})"
             G.add_edge(macro_node, child_node)
 
-    pos = nx.spring_layout(G)
+    pos = nx.spring_layout(G, seed=42)
 
     edge_x = []
     edge_y = []
 
     for edge in G.edges():
-
         x0, y0 = pos[edge[0]]
         x1, y1 = pos[edge[1]]
 
@@ -193,7 +181,8 @@ def build_tree_graph(tree):
     edge_trace = go.Scatter(
         x=edge_x,
         y=edge_y,
-        mode="lines"
+        mode="lines",
+        hoverinfo="none",
     )
 
     node_x = []
@@ -201,12 +190,9 @@ def build_tree_graph(tree):
     text = []
 
     for node in G.nodes():
-
         x, y = pos[node]
-
         node_x.append(x)
         node_y.append(y)
-
         text.append(node)
 
     node_trace = go.Scatter(
@@ -215,12 +201,12 @@ def build_tree_graph(tree):
         mode="markers+text",
         text=text,
         textposition="top center",
-        marker=dict(size=20)
+        hoverinfo="text",
+        marker=dict(size=20),
     )
 
     fig = go.Figure(data=[edge_trace, node_trace])
-
-    fig.update_layout(showlegend=False)
+    fig.update_layout(showlegend=False, margin=dict(l=20, r=20, t=20, b=20))
 
     return fig
 
@@ -229,44 +215,49 @@ def build_tree_graph(tree):
 # OPENAI
 # -----------------------
 
-def call_llm_json(client, prompt):
+def extract_json_from_text(text: str):
+    text = (text or "").strip()
 
     try:
+        return json.loads(text)
+    except Exception:
+        pass
 
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except Exception:
+            pass
+
+    return {"tree": [], "raw_output": text}
+
+
+def call_llm_json(client: OpenAI, prompt: str):
+    try:
         response = client.responses.create(
             model="gpt-5.4",
             input=prompt,
-            temperature=0.2,
-            response_format={"type": "json_object"}
         )
 
-        text = response.output_text
-
-        return json.loads(text)
+        text = getattr(response, "output_text", "") or ""
+        return extract_json_from_text(text)
 
     except Exception as e:
-
         st.error(f"OpenAI error: {e}")
-
         return {"tree": []}
 
 
-def call_llm_text(client, prompt):
-
+def call_llm_text(client: OpenAI, prompt: str):
     try:
-
         response = client.responses.create(
             model="gpt-5.4",
             input=prompt,
-            temperature=0.6
         )
-
-        return response.output_text
+        return getattr(response, "output_text", "") or ""
 
     except Exception as e:
-
         st.error(f"OpenAI error: {e}")
-
         return ""
 
 
@@ -277,13 +268,24 @@ def call_llm_text(client, prompt):
 st.sidebar.title("API Keys")
 
 OPENAI_KEY = st.sidebar.text_input("OpenAI API Key", type="password")
-
 SERPER_KEY = st.sidebar.text_input("Serper API Key", type="password")
-
 SERPAPI_KEY = st.sidebar.text_input("SerpAPI Key", type="password")
 
+client = OpenAI(api_key=OPENAI_KEY) if OPENAI_KEY else None
 
-client = OpenAI(api_key=OPENAI_KEY)
+
+# -----------------------
+# session state
+# -----------------------
+
+if "gap" not in st.session_state:
+    st.session_state.gap = None
+
+if "source_text" not in st.session_state:
+    st.session_state.source_text = ""
+
+if "analysis_done" not in st.session_state:
+    st.session_state.analysis_done = False
 
 
 # -----------------------
@@ -292,96 +294,177 @@ client = OpenAI(api_key=OPENAI_KEY)
 
 st.title("SEO Content Gap Analyzer")
 
-
 keyword = st.text_input("Keyword")
-
 h1 = st.text_input("Titolo H1")
-
 url = st.text_input("URL da analizzare")
 
 
 if st.button("Esegui Analisi"):
+    if not OPENAI_KEY or not SERPER_KEY or not SERPAPI_KEY:
+        st.error("Inserisci tutte le API key nella sidebar.")
+        st.stop()
 
-    serp = get_serp(keyword, SERPER_KEY)
+    if not keyword or not h1 or not url:
+        st.error("Keyword, H1 e URL sono obbligatori.")
+        st.stop()
 
-    paa = get_paa(keyword, SERPAPI_KEY)
+    try:
+        serp = get_serp(keyword, SERPER_KEY)
+        paa = get_paa(keyword, SERPAPI_KEY)
+        html, text = fetch_page(url)
+        meta = extract_metadata(html)
 
-    html, text = fetch_page(url)
+        if not text:
+            st.error("Non sono riuscito a estrarre il contenuto dalla URL indicata.")
+            st.stop()
 
-    meta = extract_metadata(html)
+        competitors_text = ""
+        competitors_meta = []
 
-    competitors_text = ""
-
-    for c in serp:
-
-        _, ctext = fetch_page(c["link"])
-
-        competitors_text += ctext[:3000]
-
-
-    prompt = f"""
-Analizza il contenuto e fai una gap analysis SEO.
-
-KEYWORD:
-{keyword}
-
-PAA:
-{paa}
-
-SOURCE CONTENT:
-{text[:6000]}
-
-COMPETITOR CONTENT:
-{competitors_text[:8000]}
-
-Restituisci JSON con struttura:
-
-tree:
- topic
- status
- children
-"""
-
-    gap = call_llm_json(client, prompt)
-
-    st.session_state.gap = gap
-
-
-# -----------------------
-# show graph
-# -----------------------
-
-if "gap" in st.session_state:
-
-    gap_data = st.session_state.gap
-
-    tree = []
-
-    if isinstance(gap_data, dict):
-        tree = gap_data.get("tree", [])
-
-    fig = build_tree_graph(tree)
-
-    st.plotly_chart(fig, use_container_width=True)
-
-
-    st.write("---")
-
-    if st.button("Genera Contenuto Ottimizzato"):
+        for c in serp:
+            c_html, c_text = fetch_page(c["link"])
+            c_meta = extract_metadata(c_html) if c_html else {"title": "", "h1": "", "meta": ""}
+            competitors_meta.append(
+                {
+                    "url": c["link"],
+                    "title": c.get("title", ""),
+                    "html_title": c_meta.get("title", ""),
+                    "h1": c_meta.get("h1", ""),
+                    "meta": c_meta.get("meta", ""),
+                }
+            )
+            competitors_text += f"\nURL: {c['link']}\nTITLE: {c_meta.get('title', '')}\nH1: {c_meta.get('h1', '')}\nCONTENT:\n{c_text[:2000]}\n"
 
         prompt = f"""
-Scrivi un contenuto SEO ottimizzato.
+Sei un SEO strategist senior.
+
+Analizza il contenuto sorgente confrontandolo con competitor e PAA.
+Rispondi SOLO con JSON valido.
+
+La struttura deve essere ESATTAMENTE:
+{{
+  "summary": {{
+    "search_intent": "string",
+    "overall_verdict": "string",
+    "priority_actions": ["string"]
+  }},
+  "tree": [
+    {{
+      "topic": "string",
+      "status": "covered|partial|missing",
+      "children": [
+        {{
+          "topic": "string",
+          "status": "covered|partial|missing"
+        }}
+      ]
+    }}
+  ],
+  "missing_paa": ["string"],
+  "recommended_headings": ["string"]
+}}
 
 KEYWORD:
 {keyword}
 
-Mantieni H1:
+H1 DICHIARATO:
 {h1}
 
-CONTENT:
-{text[:8000]}
+URL SORGENTE:
+{url}
+
+METADATI SORGENTE:
+{json.dumps(meta, ensure_ascii=False)}
+
+PAA:
+{json.dumps(paa, ensure_ascii=False)}
+
+CONTENUTO SORGENTE:
+{text[:6000]}
+
+COMPETITOR:
+{competitors_text[:8000]}
+"""
+
+        gap = call_llm_json(client, prompt)
+
+        st.session_state.gap = gap
+        st.session_state.source_text = text
+        st.session_state.analysis_done = True
+
+    except Exception as e:
+        st.error(f"Errore durante l'analisi: {e}")
+
+
+if st.session_state.analysis_done and st.session_state.gap:
+    gap_data = st.session_state.gap
+
+    if not isinstance(gap_data, dict):
+        gap_data = {"tree": [], "raw_output": str(gap_data)}
+
+    summary = gap_data.get("summary", {})
+    tree = gap_data.get("tree", [])
+    missing_paa = gap_data.get("missing_paa", [])
+    recommended_headings = gap_data.get("recommended_headings", [])
+
+    st.subheader("Sintesi")
+    if summary:
+        st.write(f"**Intento di ricerca:** {summary.get('search_intent', '-')}")
+        st.write(f"**Verdetto:** {summary.get('overall_verdict', '-')}")
+        for action in summary.get("priority_actions", []):
+            st.write(f"- {action}")
+
+    st.subheader("Grafo Gap Analysis")
+    fig = build_tree_graph(tree)
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.subheader("Dettaglio")
+    for macro in tree:
+        with st.expander(f"{macro.get('topic', 'Topic')} [{macro.get('status', 'unknown')}]"):
+            for child in macro.get("children", []):
+                st.write(f"- {child.get('topic', 'Subtopic')} [{child.get('status', 'unknown')}]")
+
+    if missing_paa:
+        st.subheader("PAA mancanti")
+        for item in missing_paa:
+            st.write(f"- {item}")
+
+    if recommended_headings:
+        st.subheader("Heading consigliati")
+        for item in recommended_headings:
+            st.write(f"- {item}")
+
+    if "raw_output" in gap_data:
+        st.subheader("Debug output modello")
+        st.code(gap_data["raw_output"])
+
+    st.write("---")
+    st.subheader("Ottimizzazione del contenuto")
+
+    if st.button("Genera Contenuto Ottimizzato"):
+        prompt = f"""
+Sei un SEO copywriter senior.
+
+Scrivi un contenuto SEO ottimizzato basato sulla gap analysis.
+Mantieni ESATTAMENTE questo H1:
+{h1}
+
+Integra in modo naturale i gap, le PAA mancanti e i topic emersi.
+Restituisci testo in questo formato:
+
+TITLE TAG: ...
+META DESCRIPTION: ...
+ARTICLE HTML: ...
+
+KEYWORD:
+{keyword}
+
+GAP ANALYSIS:
+{json.dumps(gap_data, ensure_ascii=False)}
+
+CONTENUTO DI PARTENZA:
+{st.session_state.source_text[:8000]}
 """
 
         optimized = call_llm_text(client, prompt)
-
-        st.write(optimized)
+        st.code(optimized)
