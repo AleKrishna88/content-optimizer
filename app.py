@@ -14,7 +14,6 @@ from openai import OpenAI
 
 st.set_page_config(page_title="SEO Content Optimizer", layout="wide")
 
-
 USER_AGENT = "Mozilla/5.0"
 
 BLOCKED_DOMAINS = {
@@ -235,7 +234,7 @@ def call_llm_json(client, prompt):
     try:
 
         response = client.responses.create(
-            model="gpt-4.1-mini",
+            model="gpt-5.4",
             input=prompt,
             temperature=0.2,
             response_format={"type": "json_object"}
@@ -257,7 +256,7 @@ def call_llm_text(client, prompt):
     try:
 
         response = client.responses.create(
-            model="gpt-4.1-mini",
+            model="gpt-5.4",
             input=prompt,
             temperature=0.6
         )
@@ -275,13 +274,13 @@ def call_llm_text(client, prompt):
 # sidebar
 # -----------------------
 
-st.sidebar.title("API")
+st.sidebar.title("API Keys")
 
-OPENAI_KEY = st.sidebar.text_input("OpenAI", type="password")
+OPENAI_KEY = st.sidebar.text_input("OpenAI API Key", type="password")
 
-SERPER_KEY = st.sidebar.text_input("Serper", type="password")
+SERPER_KEY = st.sidebar.text_input("Serper API Key", type="password")
 
-SERPAPI_KEY = st.sidebar.text_input("SerpAPI", type="password")
+SERPAPI_KEY = st.sidebar.text_input("SerpAPI Key", type="password")
 
 
 client = OpenAI(api_key=OPENAI_KEY)
@@ -291,17 +290,17 @@ client = OpenAI(api_key=OPENAI_KEY)
 # UI
 # -----------------------
 
-st.title("SEO Content Optimizer")
+st.title("SEO Content Gap Analyzer")
 
 
 keyword = st.text_input("Keyword")
 
-h1 = st.text_input("H1")
+h1 = st.text_input("Titolo H1")
 
-url = st.text_input("URL")
+url = st.text_input("URL da analizzare")
 
 
-if st.button("Analyze"):
+if st.button("Esegui Analisi"):
 
     serp = get_serp(keyword, SERPER_KEY)
 
@@ -317,11 +316,11 @@ if st.button("Analyze"):
 
         _, ctext = fetch_page(c["link"])
 
-        competitors_text += ctext[:4000]
+        competitors_text += ctext[:3000]
 
 
     prompt = f"""
-Analizza il contenuto e fai gap analysis SEO.
+Analizza il contenuto e fai una gap analysis SEO.
 
 KEYWORD:
 {keyword}
@@ -329,11 +328,11 @@ KEYWORD:
 PAA:
 {paa}
 
-CONTENT:
-{text[:8000]}
+SOURCE CONTENT:
+{text[:6000]}
 
-COMPETITOR:
-{competitors_text[:12000]}
+COMPETITOR CONTENT:
+{competitors_text[:8000]}
 
 Restituisci JSON con struttura:
 
@@ -342,7 +341,6 @@ tree:
  status
  children
 """
-
 
     gap = call_llm_json(client, prompt)
 
@@ -360,7 +358,6 @@ if "gap" in st.session_state:
     tree = []
 
     if isinstance(gap_data, dict):
-
         tree = gap_data.get("tree", [])
 
     fig = build_tree_graph(tree)
@@ -368,10 +365,12 @@ if "gap" in st.session_state:
     st.plotly_chart(fig, use_container_width=True)
 
 
-    if st.button("Generate optimized content"):
+    st.write("---")
+
+    if st.button("Genera Contenuto Ottimizzato"):
 
         prompt = f"""
-Scrivi contenuto SEO ottimizzato.
+Scrivi un contenuto SEO ottimizzato.
 
 KEYWORD:
 {keyword}
@@ -380,7 +379,7 @@ Mantieni H1:
 {h1}
 
 CONTENT:
-{text[:10000]}
+{text[:8000]}
 """
 
         optimized = call_llm_text(client, prompt)
