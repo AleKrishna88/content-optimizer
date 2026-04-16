@@ -94,6 +94,8 @@ def get_serp(keyword: str, api_key: str):
 
     payload = {
         "q": keyword,
+        "hl": HL,
+        "gl": GL,
         "num": 10,
     }
 
@@ -129,6 +131,8 @@ def get_paa(keyword: str, api_key: str):
     params = {
         "engine": "google",
         "q": keyword,
+        "hl": HL,
+        "gl": GL,
         "api_key": api_key,
     }
 
@@ -271,6 +275,11 @@ OPENAI_KEY = st.sidebar.text_input("OpenAI API Key", type="password")
 SERPER_KEY = st.sidebar.text_input("Serper API Key", type="password")
 SERPAPI_KEY = st.sidebar.text_input("SerpAPI Key", type="password")
 
+st.sidebar.subheader("SERP Settings")
+
+HL = st.sidebar.selectbox("Language (hl)", ["it", "en", "fr", "es", "de"])
+GL = st.sidebar.selectbox("Country (gl)", ["it", "us", "uk", "fr", "de", "es"])
+
 client = OpenAI(api_key=OPENAI_KEY) if OPENAI_KEY else None
 
 
@@ -338,6 +347,8 @@ if st.button("Esegui Analisi"):
         prompt = f"""
 Sei un SEO strategist senior.
 
+La lingua di output deve essere: {HL}
+
 Analizza il contenuto sorgente confrontandolo con competitor e PAA.
 Rispondi SOLO con JSON valido.
 
@@ -394,77 +405,3 @@ COMPETITOR:
 
     except Exception as e:
         st.error(f"Errore durante l'analisi: {e}")
-
-
-if st.session_state.analysis_done and st.session_state.gap:
-    gap_data = st.session_state.gap
-
-    if not isinstance(gap_data, dict):
-        gap_data = {"tree": [], "raw_output": str(gap_data)}
-
-    summary = gap_data.get("summary", {})
-    tree = gap_data.get("tree", [])
-    missing_paa = gap_data.get("missing_paa", [])
-    recommended_headings = gap_data.get("recommended_headings", [])
-
-    st.subheader("Sintesi")
-    if summary:
-        st.write(f"**Intento di ricerca:** {summary.get('search_intent', '-')}")
-        st.write(f"**Verdetto:** {summary.get('overall_verdict', '-')}")
-        for action in summary.get("priority_actions", []):
-            st.write(f"- {action}")
-
-    st.subheader("Grafo Gap Analysis")
-    fig = build_tree_graph(tree)
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.subheader("Dettaglio")
-    for macro in tree:
-        with st.expander(f"{macro.get('topic', 'Topic')} [{macro.get('status', 'unknown')}]"):
-            for child in macro.get("children", []):
-                st.write(f"- {child.get('topic', 'Subtopic')} [{child.get('status', 'unknown')}]")
-
-    if missing_paa:
-        st.subheader("PAA mancanti")
-        for item in missing_paa:
-            st.write(f"- {item}")
-
-    if recommended_headings:
-        st.subheader("Heading consigliati")
-        for item in recommended_headings:
-            st.write(f"- {item}")
-
-    if "raw_output" in gap_data:
-        st.subheader("Debug output modello")
-        st.code(gap_data["raw_output"])
-
-    st.write("---")
-    st.subheader("Ottimizzazione del contenuto")
-
-    if st.button("Genera Contenuto Ottimizzato"):
-        prompt = f"""
-Sei un SEO copywriter senior.
-
-Scrivi un contenuto SEO ottimizzato basato sulla gap analysis.
-Mantieni ESATTAMENTE questo H1:
-{h1}
-
-Integra in modo naturale i gap, le PAA mancanti e i topic emersi.
-Restituisci testo in questo formato:
-
-TITLE TAG: ...
-META DESCRIPTION: ...
-ARTICLE HTML: ...
-
-KEYWORD:
-{keyword}
-
-GAP ANALYSIS:
-{json.dumps(gap_data, ensure_ascii=False)}
-
-CONTENUTO DI PARTENZA:
-{st.session_state.source_text[:8000]}
-"""
-
-        optimized = call_llm_text(client, prompt)
-        st.code(optimized)
