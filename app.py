@@ -401,15 +401,66 @@ if st.session_state.analysis_done:
         if st.button("Genera contenuto ottimizzato"):
 
             optimization_prompt = f"""
-Rewrite and optimize this article for SEO.
+You are a senior SEO copywriter and content strategist.
 
-Language: {LANGUAGE}
+Your task is to rewrite and optimize the original article for SEO.
 
-Keyword:
+LANGUAGE:
+{LANGUAGE}
+
+PRIMARY KEYWORD:
 {keyword}
 
-Original content:
-{source_text[:10000]}
+SOURCE URL:
+{source_url}
+
+IMPORTANT REQUIREMENTS:
+
+The optimized article MUST:
+
+• preserve all useful information already present in the original content  
+• integrate the missing information identified during the gap analysis  
+• be MORE COMPLETE than the original article  
+• NEVER be shorter than the original article  
+• expand explanations where competitors provide deeper coverage  
+
+WRITING STYLE:
+
+• maintain the same tone of voice as the original article  
+• keep the text fluent, natural and discursive  
+• avoid keyword stuffing completely  
+• use the keyword and related entities naturally  
+
+FORMATTING RULES:
+
+• structure the article with clear H1, H2 and H3 headings  
+• use bullet lists ONLY when they improve clarity  
+• use tables ONLY when they genuinely help explain comparisons or structured data  
+• avoid unnecessary lists or formatting  
+
+SEO REQUIREMENTS:
+
+• align the article with the search intent behind the keyword  
+• integrate entities and related topics from the gap analysis  
+• cover missing PAA questions naturally when relevant  
+• improve semantic coverage of the topic  
+
+OUTPUT FORMAT:
+
+Return EXACTLY in this format:
+
+TITLE TAG: ...
+META DESCRIPTION: ...
+ARTICLE HTML:
+...
+
+CONTEXT DATA
+
+GAP ANALYSIS:
+{json.dumps(st.session_state.gap_data, ensure_ascii=False)}
+
+ORIGINAL CONTENT:
+{source_text[:12000]}
 """
 
             optimized = call_llm_text(client, optimization_prompt)
