@@ -377,3 +377,64 @@ if st.session_state.analysis_done:
         st.write(
             f"{i}. {comp.get('html_title') or comp.get('title')} — {comp.get('link')}"
         )
+st.divider()
+st.subheader("Ottimizzazione del contenuto")
+
+proceed = st.radio(
+    "Vuoi procedere con l'ottimizzazione del contenuto originale?",
+    ["No", "Sì"],
+    horizontal=True,
+)
+
+if proceed == "Sì":
+
+    if st.button("Genera contenuto ottimizzato"):
+
+        optimization_prompt = f"""
+You are a senior SEO copywriter.
+
+Write in this language: {LANGUAGE}
+
+Rewrite and optimize the original article.
+
+Requirements:
+- preserve existing useful information
+- integrate missing information from gap analysis
+- integrate relevant PAA
+- improve semantic coverage
+- respect SEO best practices
+- avoid keyword stuffing
+
+Return EXACTLY in this format:
+
+TITLE TAG: ...
+META DESCRIPTION: ...
+ARTICLE HTML:
+...
+
+KEYWORD:
+{keyword}
+
+SOURCE URL:
+{source_url}
+
+GAP ANALYSIS:
+{json.dumps(st.session_state.gap_data, ensure_ascii=False)}
+
+ORIGINAL CONTENT:
+{source_text[:12000]}
+"""
+
+        optimized = call_llm_text(client, optimization_prompt)
+
+        st.session_state.optimized_output = optimized
+
+        st.subheader("Output HTML")
+        st.code(optimized, language="html")
+
+        st.download_button(
+            label="Scarica TXT",
+            data=optimized,
+            file_name="seo_optimized_content.txt",
+            mime="text/plain",
+        )
