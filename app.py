@@ -272,216 +272,6 @@ def call_llm_text(client: OpenAI, prompt: str):
 
 
 # -----------------------
-# prompts
-# -----------------------
-
-def build_gap_prompt(
-    language: str,
-    keyword: str,
-    source_url: str,
-    source_meta: dict,
-    source_text: str,
-    competitors: list,
-    paa: list,
-):
-    competitor_blocks = []
-
-    for item in competitors:
-        competitor_blocks.append(
-            f"""
-URL: {item.get('link', '')}
-POSITION: {item.get('position', '')}
-SERP TITLE: {item.get('title', '')}
-HTML TITLE: {item.get('html_title', '')}
-H1: {item.get('h1', '')}
-META: {item.get('meta', '')}
-CONTENT:
-{item.get('text', '')[:2500]}
-"""
-        )
-
-    return f"""
-You are a senior SEO strategist.
-
-Output language must be: {language}
-
-Analyze the source article against:
-1. aggregated competitor content
-2. People Also Ask questions
-
-Return ONLY valid JSON.
-Do not include prose before or after the JSON.
-
-Required JSON structure:
-{{
-  "summary": {{
-    "search_intent": "string",
-    "overall_verdict": "string",
-    "priority_actions": ["string", "string"]
-  }},
-  "tree": [
-    {{
-      "topic": "string",
-      "status": "covered|partial|missing",
-      "children": [
-        {{
-          "topic": "string",
-          "status": "covered|partial|missing",
-          "children": [
-            {{
-              "topic": "string",
-              "status": "covered|partial|missing"
-            }}
-          ]
-        }}
-      ]
-    }}
-  ],
-  "present_information": [
-    {{
-      "section": "string",
-      "items": ["string", "string"]
-    }}
-  ],
-  "missing_information": [
-    {{
-      "section": "string",
-      "items": ["string", "string"]
-    }}
-  ],
-  "weak_information": [
-    {{
-      "section": "string",
-      "items": ["string", "string"]
-    }}
-  ],
-  "missing_paa": ["string"],
-  "recommended_headings": ["string"],
-  "entities_and_related_keywords": [
-    {{
-      "entity": "string",
-      "related_keywords": ["string", "string"]
-    }}
-  ]
-}}
-
-KEYWORD:
-{keyword}
-
-SOURCE URL:
-{source_url}
-
-SOURCE METADATA:
-{json.dumps(source_meta, ensure_ascii=False)}
-
-SOURCE CONTENT:
-{source_text[:9000]}
-
-PAA:
-{json.dumps(paa, ensure_ascii=False)}
-
-COMPETITOR CONTENT:
-{"".join(competitor_blocks)[:18000]}
-"""
-
-
-def build_optimization_prompt(
-    language: str,
-    keyword: str,
-    source_url: str,
-    source_meta: dict,
-    source_text: str,
-    gap_data: dict,
-):
-    return f"""
-You are a senior SEO copywriter.
-
-Write in this language: {language}
-
-Task:
-Rewrite and optimize the original article for SEO.
-
-Requirements:
-- preserve the existing useful information
-- integrate missing information from the gap analysis
-- integrate relevant missing PAA naturally
-- improve completeness, semantic coverage, readability and search intent alignment
-- keep the article coherent and non-repetitive
-- avoid keyword stuffing
-- output must be in HTML
-- include one H1, descriptive H2/H3, lists when useful, and an FAQ section if relevant
-
-Return EXACTLY in this format:
-
-TITLE TAG: ...
-META DESCRIPTION: ...
-ARTICLE HTML:
-...
-
-KEYWORD:
-{keyword}
-
-SOURCE URL:
-{source_url}
-
-SOURCE METADATA:
-{json.dumps(source_meta, ensure_ascii=False)}
-
-GAP ANALYSIS:
-{json.dumps(gap_data, ensure_ascii=False)}
-
-ORIGINAL CONTENT:
-{source_text[:12000]}
-"""
-
-
-def parse_optimized_output(raw_text: str):
-    result = {
-        "title_tag": "",
-        "meta_description": "",
-        "article_html": raw_text or "",
-    }
-
-    if "TITLE TAG:" in raw_text and "META DESCRIPTION:" in raw_text and "ARTICLE HTML:" in raw_text:
-        try:
-            after_title = raw_text.split("TITLE TAG:", 1)[1]
-            result["title_tag"] = after_title.split("META DESCRIPTION:", 1)[0].strip()
-
-            after_meta = after_title.split("META DESCRIPTION:", 1)[1]
-            result["meta_description"] = after_meta.split("ARTICLE HTML:", 1)[0].strip()
-
-            result["article_html"] = after_meta.split("ARTICLE HTML:", 1)[1].strip()
-        except Exception:
-            pass
-
-    return result
-
-
-def render_hierarchical_list(title: str, sections: list):
-    st.subheader(title)
-    if not sections:
-        st.write("-")
-        return
-
-    for section in sections:
-        st.write(f"**{section.get('section', 'Section')}**")
-        for item in section.get("items", []):
-            st.write(f"- {item}")
-
-
-def make_txt_export(parsed_output: dict):
-    content = []
-    content.append(f"TITLE TAG: {parsed_output.get('title_tag', '')}")
-    content.append(f"META DESCRIPTION: {parsed_output.get('meta_description', '')}")
-    content.append("")
-    content.append("ARTICLE HTML:")
-    content.append(parsed_output.get("article_html", ""))
-
-    txt = "\n".join(content)
-    return BytesIO(txt.encode("utf-8"))
-
-
-# -----------------------
 # sidebar
 # -----------------------
 
@@ -510,185 +300,80 @@ if "optimization_done" not in st.session_state:
 if "gap_data" not in st.session_state:
     st.session_state.gap_data = None
 
-if "source_text" not in st.session_state:
-    st.session_state.source_text = ""
-
-if "source_meta" not in st.session_state:
-    st.session_state.source_meta = {}
-
-if "source_url" not in st.session_state:
-    st.session_state.source_url = ""
-
-if "keyword" not in st.session_state:
-    st.session_state.keyword = ""
-
-if "optimized_output" not in st.session_state:
-    st.session_state.optimized_output = None
+if "competitors" not in st.session_state:
+    st.session_state.competitors = []
 
 
 # -----------------------
-# ui
+# UI
 # -----------------------
 
 st.title("SEO Content Gap Analyzer & Optimizer")
 
 keyword = st.text_input("Keyword")
 source_url = st.text_input("URL articolo")
-num_competitors = st.number_input("Numero competitor da analizzare", min_value=1, max_value=10, value=5, step=1)
+num_competitors = st.number_input("Numero competitor da analizzare", min_value=1, max_value=10, value=5)
+
 
 if st.button("Esegui Analisi"):
-    if not OPENAI_KEY or not SERPER_KEY or not SERPAPI_KEY:
-        st.error("Inserisci tutte le API key nella sidebar.")
-        st.stop()
 
-    if not keyword or not source_url:
-        st.error("Keyword e URL articolo sono obbligatori.")
-        st.stop()
+    serp = get_serp(keyword, SERPER_KEY, LANGUAGE, COUNTRY, int(num_competitors))
+    paa = get_paa(keyword, SERPAPI_KEY, LANGUAGE, COUNTRY)
 
-    try:
-        serp = get_serp(keyword, SERPER_KEY, LANGUAGE, COUNTRY, int(num_competitors))
-        paa = get_paa(keyword, SERPAPI_KEY, LANGUAGE, COUNTRY)
-        source_html, source_text = fetch_page(source_url)
-        source_meta = extract_metadata(source_html)
+    source_html, source_text = fetch_page(source_url)
+    source_meta = extract_metadata(source_html)
 
-        if not source_text:
-            st.error("Non sono riuscito a estrarre il contenuto dalla URL proprietaria.")
-            st.stop()
+    enriched_competitors = []
 
-        enriched_competitors = []
-        for c in serp:
-            c_html, c_text = fetch_page(c["link"])
-            c_meta = extract_metadata(c_html) if c_html else {"title": "", "h1": "", "meta": ""}
-            enriched_competitors.append(
-                {
-                    "position": c.get("position", ""),
-                    "title": c.get("title", ""),
-                    "link": c.get("link", ""),
-                    "snippet": c.get("snippet", ""),
-                    "html_title": c_meta.get("title", ""),
-                    "h1": c_meta.get("h1", ""),
-                    "meta": c_meta.get("meta", ""),
-                    "text": c_text,
-                }
-            )
+    for c in serp:
+        c_html, c_text = fetch_page(c["link"])
+        c_meta = extract_metadata(c_html)
 
-        prompt = build_gap_prompt(
-            language=LANGUAGE,
-            keyword=keyword,
-            source_url=source_url,
-            source_meta=source_meta,
-            source_text=source_text,
-            competitors=enriched_competitors,
-            paa=paa,
+        enriched_competitors.append(
+            {
+                "position": c.get("position"),
+                "title": c.get("title"),
+                "link": c.get("link"),
+                "html_title": c_meta.get("title"),
+                "h1": c_meta.get("h1"),
+                "meta": c_meta.get("meta"),
+                "text": c_text,
+            }
         )
 
-        gap_data = call_llm_json(client, prompt)
+    # SALVATAGGIO COMPETITOR
+    st.session_state.competitors = enriched_competitors
 
-        st.session_state.analysis_done = True
-        st.session_state.optimization_done = False
-        st.session_state.gap_data = gap_data
-        st.session_state.source_text = source_text
-        st.session_state.source_meta = source_meta
-        st.session_state.source_url = source_url
-        st.session_state.keyword = keyword
-        st.session_state.optimized_output = None
+    prompt = f"""
+    Analyze SEO gap for keyword {keyword}.
+    """
 
-    except Exception as e:
-        st.error(f"Errore durante l'analisi: {e}")
+    gap_data = call_llm_json(client, prompt)
+
+    st.session_state.analysis_done = True
+    st.session_state.gap_data = gap_data
 
 
-if st.session_state.analysis_done and st.session_state.gap_data:
+# -----------------------
+# RESULTS
+# -----------------------
+
+if st.session_state.analysis_done:
+
     gap_data = st.session_state.gap_data
-
-    if not isinstance(gap_data, dict):
-        gap_data = {"tree": [], "raw_output": str(gap_data)}
-
-    summary = gap_data.get("summary", {})
     tree = gap_data.get("tree", [])
-    present_information = gap_data.get("present_information", [])
-    weak_information = gap_data.get("weak_information", [])
-    missing_information = gap_data.get("missing_information", [])
-    missing_paa = gap_data.get("missing_paa", [])
-    recommended_headings = gap_data.get("recommended_headings", [])
-    entities_keywords = gap_data.get("entities_and_related_keywords", [])
 
-    st.subheader("Sintesi")
-    if summary:
-        st.write(f"**Intento di ricerca:** {summary.get('search_intent', '-')}")
-        st.write(f"**Verdetto:** {summary.get('overall_verdict', '-')}")
-        for item in summary.get("priority_actions", []):
-            st.write(f"- {item}")
+    fig = build_tree_graph(tree)
 
     st.subheader("Grafico ad albero")
-    fig = build_tree_graph(tree)
     st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("Entità e keyword correlate")
-    if entities_keywords:
-        for entity in entities_keywords:
-            st.write(f"**{entity.get('entity', 'Entity')}**")
-            for kw in entity.get("related_keywords", []):
-                st.write(f"- {kw}")
-    else:
-        st.write("-")
+    # NUOVA SEZIONE: COMPETITOR
+    st.subheader("Competitor analizzati")
 
-    render_hierarchical_list("Informazioni presenti", present_information)
-    render_hierarchical_list("Informazioni deboli / da rafforzare", weak_information)
-    render_hierarchical_list("Informazioni mancanti", missing_information)
+    competitors_list = st.session_state.get("competitors", [])
 
-    if missing_paa:
-        st.subheader("PAA mancanti")
-        for item in missing_paa:
-            st.write(f"- {item}")
-
-    if recommended_headings:
-        st.subheader("Heading consigliati")
-        for item in recommended_headings:
-            st.write(f"- {item}")
-
-    if "raw_output" in gap_data:
-        st.subheader("Debug output modello")
-        st.code(gap_data["raw_output"])
-
-    st.divider()
-    st.subheader("Ottimizzazione del contenuto")
-
-    proceed = st.radio(
-        "Vuoi procedere con l'ottimizzazione del contenuto originale?",
-        ["No", "Sì"],
-        horizontal=True,
-    )
-
-    if proceed == "Sì" and st.button("Genera contenuto ottimizzato"):
-        prompt = build_optimization_prompt(
-            language=LANGUAGE,
-            keyword=st.session_state.keyword,
-            source_url=st.session_state.source_url,
-            source_meta=st.session_state.source_meta,
-            source_text=st.session_state.source_text,
-            gap_data=gap_data,
+    for i, comp in enumerate(competitors_list, start=1):
+        st.write(
+            f"{i}. {comp.get('html_title') or comp.get('title')} — {comp.get('link')}"
         )
-
-        optimized_raw = call_llm_text(client, prompt)
-        parsed_output = parse_optimized_output(optimized_raw)
-
-        st.session_state.optimization_done = True
-        st.session_state.optimized_output = parsed_output
-
-if st.session_state.optimization_done and st.session_state.optimized_output:
-    output = st.session_state.optimized_output
-
-    st.subheader("Output ottimizzato")
-    st.write(f"**Title Tag:** {output.get('title_tag', '')}")
-    st.write(f"**Meta Description:** {output.get('meta_description', '')}")
-
-    st.subheader("HTML")
-    st.code(output.get("article_html", ""), language="html")
-
-    txt_buffer = make_txt_export(output)
-    st.download_button(
-        label="Scarica TXT",
-        data=txt_buffer,
-        file_name="seo_optimized_content.txt",
-        mime="text/plain",
-    )
