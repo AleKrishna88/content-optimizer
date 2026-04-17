@@ -377,7 +377,54 @@ if st.session_state.analysis_done:
     fig = build_tree_graph(tree)
 
     st.plotly_chart(fig, use_container_width=True)
+    summary = st.session_state.gap_data.get("summary", {})
+present_information = st.session_state.gap_data.get("present_information", [])
+weak_information = st.session_state.gap_data.get("weak_information", [])
+missing_information = st.session_state.gap_data.get("missing_information", [])
+missing_paa = st.session_state.gap_data.get("missing_paa", [])
+recommended_headings = st.session_state.gap_data.get("recommended_headings", [])
 
+st.subheader("Gap Analysis")
+
+if summary:
+    st.write(f"**Intento di ricerca:** {summary.get('search_intent', '-')}")
+    st.write(f"**Verdetto generale:** {summary.get('overall_verdict', '-')}")
+    actions = summary.get("priority_actions", [])
+    if actions:
+        st.write("**Azioni prioritarie:**")
+        for action in actions:
+            st.write(f"- {action}")
+
+if present_information:
+    st.subheader("Informazioni presenti")
+    for section in present_information:
+        st.write(f"**{section.get('section', 'Sezione')}**")
+        for item in section.get("items", []):
+            st.write(f"- {item}")
+
+if weak_information:
+    st.subheader("Informazioni deboli o da rafforzare")
+    for section in weak_information:
+        st.write(f"**{section.get('section', 'Sezione')}**")
+        for item in section.get("items", []):
+            st.write(f"- {item}")
+
+if missing_information:
+    st.subheader("Informazioni mancanti")
+    for section in missing_information:
+        st.write(f"**{section.get('section', 'Sezione')}**")
+        for item in section.get("items", []):
+            st.write(f"- {item}")
+
+if missing_paa:
+    st.subheader("PAA mancanti")
+    for item in missing_paa:
+        st.write(f"- {item}")
+
+if recommended_headings:
+    st.subheader("Heading consigliati")
+    for item in recommended_headings:
+        st.write(f"- {item}") 
     st.subheader("Competitor analizzati")
 
     for i, comp in enumerate(st.session_state.competitors, start=1):
