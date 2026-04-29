@@ -6,8 +6,6 @@ from urllib.parse import urlparse
 import requests
 import streamlit as st
 from bs4 import BeautifulSoup
-import networkx as nx
-import plotly.graph_objects as go
 from openai import OpenAI
 
 
@@ -158,77 +156,6 @@ def get_paa(keyword, api_key, hl, gl):
 
 
 # -----------------------
-# graph
-# -----------------------
-
-def build_tree_graph(tree):
-
-    G = nx.DiGraph()
-    root = "Gap Analysis"
-
-    G.add_node(root)
-
-    for macro in tree:
-
-        macro_node = f"{macro.get('topic')} ({macro.get('status')})"
-        G.add_edge(root, macro_node)
-
-        for child in macro.get("children", []):
-
-            child_node = f"{child.get('topic')} ({child.get('status')})"
-            G.add_edge(macro_node, child_node)
-
-    pos = nx.spring_layout(G)
-
-    edge_x = []
-    edge_y = []
-
-    for edge in G.edges():
-
-        x0, y0 = pos[edge[0]]
-        x1, y1 = pos[edge[1]]
-
-        edge_x += [x0, x1, None]
-        edge_y += [y0, y1, None]
-
-    edge_trace = go.Scatter(
-        x=edge_x,
-        y=edge_y,
-        mode="lines"
-    )
-
-    node_x = []
-    node_y = []
-    texts = []
-
-    for node in G.nodes():
-
-        x, y = pos[node]
-
-        node_x.append(x)
-        node_y.append(y)
-        texts.append(node)
-
-    node_trace = go.Scatter(
-        x=node_x,
-        y=node_y,
-        text=texts,
-        mode="markers+text",
-        textposition="top center",
-        marker=dict(size=18)
-    )
-
-    fig = go.Figure(data=[edge_trace, node_trace])
-
-    fig.update_layout(
-        showlegend=False,
-        margin=dict(l=20, r=20, t=20, b=20)
-    )
-
-    return fig
-
-
-# -----------------------
 # OPENAI
 # -----------------------
 
@@ -247,7 +174,12 @@ def extract_json_from_text(text):
         except:
             pass
 
-    return {"tree": []}
+    return {
+        "summary": {},
+        "present_information": [],
+        "weak_information": [],
+        "missing_information": []
+    }
 
 
 def call_llm_json(client, prompt):
@@ -303,6 +235,9 @@ if "competitors" not in st.session_state:
 if "gap_data" not in st.session_state:
     st.session_state.gap_data = None
 
+if "source_text" not in st.session_state:
+    st.session_state.source_text = ""
+
 
 # -----------------------
 # UI
@@ -329,6 +264,7 @@ if st.button("Esegui Analisi"):
     paa = get_paa(keyword, SERPAPI_KEY, LANGUAGE, COUNTRY)
 
     html, source_text = fetch_page(source_url)
+    st.session_state.source_text = source_text
 
     enriched_competitors = []
 
@@ -354,8 +290,82 @@ if st.button("Esegui Analisi"):
 
     st.session_state.competitors = enriched_competitors
 
+    source_meta = extract_metadata(html)
+
     prompt = f"""
-Analyze SEO gap for keyword {keyword}.
+You are an expert SEO strategist and content gap analyst.
+
+Analyze the source article against the top-ranking competitors for the target keyword.
+Your job is to identify which entities, subtopics, and relevant keywords the source article already covers, which ones are weak, and which ones are missing.
+
+TARGET KEYWORD:
+{keyword}
+
+LANGUAGE:
+{LANGUAGE}
+
+COUNTRY:
+{COUNTRY}
+
+SOURCE ARTICLE URL:
+{source_url}
+
+SOURCE ARTICLE METADATA:
+{json.dumps(source_meta, ensure_ascii=False)}
+
+PEOPLE ALSO ASK QUESTIONS:
+{json.dumps(paa, ensure_ascii=False)}
+
+COMPETITOR SNAPSHOT:
+{json.dumps(enriched_competitors, ensure_ascii=False)}
+
+SOURCE ARTICLE TEXT:
+{source_text[:12000]}
+
+ANALYSIS INSTRUCTIONS:
+- Infer the dominant search intent for the keyword.
+- Compare the source article with the competitors' visible coverage.
+- Focus on topical completeness, depth, clarity, usefulness, and semantic coverage.
+- Treat repeated topics across multiple competitors as stronger signals.
+- Use the PAA questions to identify missing subtopics and user needs.
+- Focus especially on entities, related concepts, and keyword areas that are present, weak, or absent.
+- Do not invent claims about the source article that are unsupported by the provided text.
+- Keep recommendations practical and specific.
+- Write all output in Italian.
+
+RETURN ONLY VALID JSON.
+
+Use exactly this structure:
+{{
+  "summary": {{
+    "search_intent": "string",
+    "overall_verdict": "string",
+    "priority_actions": ["string"]
+  }},
+  "present_information": [
+    {{
+      "section": "string",
+      "items": ["string"]
+    }}
+  ],
+  "weak_information": [
+    {{
+      "section": "string",
+      "items": ["string"]
+    }}
+  ],
+  "missing_information": [
+    {{
+      "section": "string",
+      "items": ["string"]
+    }}
+  ]
+}}
+
+QUALITY BAR:
+- Organize sections around entities, subtopics, semantic areas, or keyword clusters.
+- Avoid duplicates across present, weak, and missing lists.
+- If evidence is limited for a point, prefer conservative wording.
 """
 
     gap = call_llm_json(client, prompt)
@@ -370,65 +380,46 @@ Analyze SEO gap for keyword {keyword}.
 
 if st.session_state.analysis_done:
 
-    tree = st.session_state.gap_data.get("tree", [])
-
-    st.subheader("Grafico ad albero")
-
-    fig = build_tree_graph(tree)
-
-    st.plotly_chart(fig, use_container_width=True)
     summary = st.session_state.gap_data.get("summary", {})
-present_information = st.session_state.gap_data.get("present_information", [])
-weak_information = st.session_state.gap_data.get("weak_information", [])
-missing_information = st.session_state.gap_data.get("missing_information", [])
-missing_paa = st.session_state.gap_data.get("missing_paa", [])
-recommended_headings = st.session_state.gap_data.get("recommended_headings", [])
+    present_information = st.session_state.gap_data.get("present_information", [])
+    weak_information = st.session_state.gap_data.get("weak_information", [])
+    missing_information = st.session_state.gap_data.get("missing_information", [])
 
-st.subheader("Gap Analysis")
+    st.subheader("Riepilogo analisi")
 
-if summary:
-    st.write(f"**Intento di ricerca:** {summary.get('search_intent', '-')}")
-    st.write(f"**Verdetto generale:** {summary.get('overall_verdict', '-')}")
-    actions = summary.get("priority_actions", [])
-    if actions:
-        st.write("**Azioni prioritarie:**")
-        for action in actions:
-            st.write(f"- {action}")
+    if summary:
+        st.write(f"**Intento di ricerca:** {summary.get('search_intent', '-')}")
+        st.write(f"**Verdetto generale:** {summary.get('overall_verdict', '-')}")
+        actions = summary.get("priority_actions", [])
+        if actions:
+            st.write("**Azioni prioritarie:**")
+            for action in actions:
+                st.write(f"- {action}")
 
-if present_information:
-    st.subheader("Informazioni presenti")
-    for section in present_information:
-        st.write(f"**{section.get('section', 'Sezione')}**")
-        for item in section.get("items", []):
-            st.write(f"- {item}")
+    if present_information:
+        st.subheader("Entita e keyword presenti")
+        for section in present_information:
+            st.write(f"**{section.get('section', 'Sezione')}**")
+            for item in section.get("items", []):
+                st.write(f"- {item}")
 
-if weak_information:
-    st.subheader("Informazioni deboli o da rafforzare")
-    for section in weak_information:
-        st.write(f"**{section.get('section', 'Sezione')}**")
-        for item in section.get("items", []):
-            st.write(f"- {item}")
+    if weak_information:
+        st.subheader("Entita e keyword da rafforzare")
+        for section in weak_information:
+            st.write(f"**{section.get('section', 'Sezione')}**")
+            for item in section.get("items", []):
+                st.write(f"- {item}")
 
-if missing_information:
-    st.subheader("Informazioni mancanti")
-    for section in missing_information:
-        st.write(f"**{section.get('section', 'Sezione')}**")
-        for item in section.get("items", []):
-            st.write(f"- {item}")
+    if missing_information:
+        st.subheader("Entita e keyword mancanti")
+        for section in missing_information:
+            st.write(f"**{section.get('section', 'Sezione')}**")
+            for item in section.get("items", []):
+                st.write(f"- {item}")
 
-if missing_paa:
-    st.subheader("PAA mancanti")
-    for item in missing_paa:
-        st.write(f"- {item}")
-
-if recommended_headings:
-    st.subheader("Heading consigliati")
-    for item in recommended_headings:
-        st.write(f"- {item}") 
     st.subheader("Competitor analizzati")
 
     for i, comp in enumerate(st.session_state.competitors, start=1):
-
         st.write(
             f"{i}. {comp.get('html_title') or comp.get('title')} — {comp.get('link')}"
         )
@@ -507,7 +498,7 @@ GAP ANALYSIS:
 {json.dumps(st.session_state.gap_data, ensure_ascii=False)}
 
 ORIGINAL CONTENT:
-{source_text[:12000]}
+{st.session_state.source_text[:12000]}
 """
 
             optimized = call_llm_text(client, optimization_prompt)
