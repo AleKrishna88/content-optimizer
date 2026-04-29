@@ -502,6 +502,9 @@ ORIGINAL CONTENT:
 """
 
             optimized = call_llm_text(client, optimization_prompt)
+            title_match = re.search(r"TITLE TAG:\s*(.+)", optimized)
+            title_tag = title_match.group(1).strip() if title_match else "seo_content"
+            safe_title = re.sub(r"[^a-zA-Z0-9_-]+", "-", title_tag).strip("-") or "seo_content"
 
             st.subheader("Output HTML")
 
@@ -510,6 +513,6 @@ ORIGINAL CONTENT:
             st.download_button(
                 label="Scarica TXT",
                 data=optimized,
-                file_name="seo_content.txt",
+                file_name=f"{safe_title}.txt",
                 mime="text/plain"
             )
